@@ -24,8 +24,10 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.AccessTime
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Alarm
+import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.Call
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
@@ -33,6 +35,7 @@ import androidx.compose.material.icons.filled.CloudDone
 import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.Devices
 import androidx.compose.material.icons.filled.Event
+import androidx.compose.material.icons.filled.Keyboard
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.NotificationsActive
 import androidx.compose.material.icons.filled.NotificationsOff
@@ -43,6 +46,8 @@ import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Checkbox
+import androidx.compose.material3.DatePicker
+import androidx.compose.material3.DatePickerDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
@@ -56,9 +61,14 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.TimeInput
+import androidx.compose.material3.TimePicker
+import androidx.compose.material3.rememberDatePickerState
 import androidx.compose.material3.rememberModalBottomSheetState
+import androidx.compose.material3.rememberTimePickerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
@@ -89,6 +99,7 @@ import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Date
 import java.util.Locale
+import java.util.TimeZone
 
 fun priorityColor(priority: TaskPriority): Color = when (priority) {
     TaskPriority.URGENT -> PriorityUrgentColor
@@ -151,6 +162,9 @@ fun TaskEditorSheet(
         mutableStateOf(initialTask?.alertModeEnum() ?: TaskAlertMode.NONE)
     }
     var pinned by remember(initialTask) { mutableStateOf(initialTask?.pinned ?: false) }
+
+    var isClockPickerOpen by remember { mutableStateOf(false) }
+    var isDueDateCalendarOpen by remember { mutableStateOf(false) }
 
     val subtasks = remember(initialTask) {
         mutableStateListOf<SubtaskEntry>().apply {
@@ -251,7 +265,7 @@ fun TaskEditorSheet(
 
             Spacer(modifier = Modifier.height(16.dp))
 
-            // Notification, Pop-Up & Incoming Call Alert Section
+            // Clock Time Scheduling & Alert Mode Section
             Surface(
                 color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f),
                 shape = MaterialTheme.shapes.medium,
@@ -272,11 +286,11 @@ fun TaskEditorSheet(
                                     TaskAlertMode.CALL -> Icons.Default.Call
                                     TaskAlertMode.POPUP -> Icons.Default.NotificationsActive
                                     TaskAlertMode.NOTIFICATION -> Icons.Default.Notifications
-                                    TaskAlertMode.NONE -> Icons.Default.NotificationsOff
+                                    TaskAlertMode.NONE -> Icons.Default.AccessTime
                                 },
                                 contentDescription = null,
                                 tint = if (alertMode == TaskAlertMode.NONE) {
-                                    MaterialTheme.colorScheme.onSurfaceVariant
+                                    MaterialTheme.colorScheme.primary
                                 } else {
                                     EmeraldSync
                                 },
@@ -284,25 +298,140 @@ fun TaskEditorSheet(
                             )
                             Spacer(modifier = Modifier.width(8.dp))
                             Text(
-                                text = "Notify & Alert Style",
-                                style = MaterialTheme.typography.titleSmall
+                                text = "Clock Time Schedule & Alert Mode",
+                                style = MaterialTheme.typography.titleSmall,
+                                fontWeight = FontWeight.Bold
                             )
                         }
 
-                        if (reminderTimeMillis > 0L && alertMode != TaskAlertMode.NONE) {
-                            val timeFormatted = remember(reminderTimeMillis) {
-                                SimpleDateFormat("MMM d, h:mm:ss a", Locale.getDefault())
-                                    .format(Date(reminderTimeMillis))
+                        if (reminderTimeMillis > 0L) {
+                            TextButton(
+                                onClick = {
+                                    reminderTimeMillis = 0L
+                                    alertMode = TaskAlertMode.NONE
+                                }
+                            ) {
+                                Text("Clear", style = MaterialTheme.typography.labelSmall)
                             }
-                            Text(
-                                text = timeFormatted,
-                                style = MaterialTheme.typography.labelSmall,
-                                color = EmeraldSync
+                        }
+                    }
+
+                    // Prominent Interactive Clock Time & Date Picker Button Card
+                    Surface(
+                        color = if (reminderTimeMillis > 0L && alertMode != TaskAlertMode.NONE) {
+                            EmeraldSync.copy(alpha = 0.16f)
+                        } else {
+                            MaterialTheme.colorScheme.surface
+                        },
+                        shape = RoundedCornerShape(14.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .border(
+                                width = 1.dp,
+                                color = if (reminderTimeMillis > 0L && alertMode != TaskAlertMode.NONE) {
+                                    EmeraldSync
+                                } else {
+                                    MaterialTheme.colorScheme.outline.copy(alpha = 0.4f)
+                                },
+                                shape = RoundedCornerShape(14.dp)
                             )
+                            .clickable { isClockPickerOpen = true }
+                            .testTag("open_clock_time_picker_button")
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 14.dp, vertical = 12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(40.dp)
+                                        .clip(CircleShape)
+                                        .background(
+                                            if (reminderTimeMillis > 0L && alertMode != TaskAlertMode.NONE) {
+                                                EmeraldSync.copy(alpha = 0.25f)
+                                            } else {
+                                                MaterialTheme.colorScheme.primaryContainer
+                                            }
+                                        ),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.AccessTime,
+                                        contentDescription = "Set Clock Time",
+                                        tint = if (reminderTimeMillis > 0L && alertMode != TaskAlertMode.NONE) {
+                                            EmeraldSync
+                                        } else {
+                                            MaterialTheme.colorScheme.onPrimaryContainer
+                                        },
+                                        modifier = Modifier.size(22.dp)
+                                    )
+                                }
+                                Spacer(modifier = Modifier.width(12.dp))
+                                Column {
+                                    if (reminderTimeMillis > 0L && alertMode != TaskAlertMode.NONE) {
+                                        val clockText = remember(reminderTimeMillis) {
+                                            SimpleDateFormat("h:mm a", Locale.getDefault())
+                                                .format(Date(reminderTimeMillis))
+                                        }
+                                        val dateText = remember(reminderTimeMillis) {
+                                            SimpleDateFormat("EEE, MMM d, yyyy", Locale.getDefault())
+                                                .format(Date(reminderTimeMillis))
+                                        }
+                                        Text(
+                                            text = "$clockText • $dateText",
+                                            style = MaterialTheme.typography.titleMedium,
+                                            color = MaterialTheme.colorScheme.onSurface,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                        Text(
+                                            text = "Alert Mode: ${alertMode.label} • Tap to change clock time",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = EmeraldSync
+                                        )
+                                    } else {
+                                        Text(
+                                            text = "Set Exact Clock Time & Date",
+                                            style = MaterialTheme.typography.titleSmall,
+                                            color = MaterialTheme.colorScheme.onSurface,
+                                            fontWeight = FontWeight.SemiBold
+                                        )
+                                        Text(
+                                            text = "Pick hour, minute (AM/PM) & date on clock",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                }
+                            }
+
+                            Surface(
+                                color = MaterialTheme.colorScheme.primary,
+                                shape = RoundedCornerShape(10.dp)
+                            ) {
+                                Text(
+                                    text = if (reminderTimeMillis > 0L) "Change" else "Set Clock",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = MaterialTheme.colorScheme.onPrimary,
+                                    fontWeight = FontWeight.Bold,
+                                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
+                                )
+                            }
                         }
                     }
 
                     // Alert Mode Chips (None, Notification, Pop-Up, Incoming Call)
+                    Text(
+                        text = "Alert Mode",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -316,7 +445,12 @@ fun TaskEditorSheet(
                                 onClick = {
                                     alertMode = mode
                                     if (mode != TaskAlertMode.NONE && reminderTimeMillis <= System.currentTimeMillis()) {
-                                        reminderTimeMillis = System.currentTimeMillis() + 60_000L
+                                        val cal = Calendar.getInstance().apply {
+                                            add(Calendar.MINUTE, 10)
+                                            set(Calendar.SECOND, 0)
+                                            set(Calendar.MILLISECOND, 0)
+                                        }
+                                        reminderTimeMillis = cal.timeInMillis
                                     } else if (mode == TaskAlertMode.NONE) {
                                         reminderTimeMillis = 0L
                                     }
@@ -335,9 +469,9 @@ fun TaskEditorSheet(
                         }
                     }
 
-                    // Reminder Time Presets
+                    // Quick Time Presets
                     Text(
-                        text = "When to Notify / Call",
+                        text = "Quick Presets",
                         style = MaterialTheme.typography.labelMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -347,6 +481,17 @@ fun TaskEditorSheet(
                             .horizontalScroll(rememberScrollState()),
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
+                        AssistChip(
+                            onClick = { isClockPickerOpen = true },
+                            label = { Text("Pick Clock Time...") },
+                            leadingIcon = {
+                                Icon(
+                                    Icons.Default.AccessTime,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                            }
+                        )
                         AssistChip(
                             onClick = {
                                 reminderTimeMillis = System.currentTimeMillis() + 10_000L
@@ -393,21 +538,13 @@ fun TaskEditorSheet(
                                     set(Calendar.HOUR_OF_DAY, 9)
                                     set(Calendar.MINUTE, 0)
                                     set(Calendar.SECOND, 0)
+                                    set(Calendar.MILLISECOND, 0)
                                 }
                                 reminderTimeMillis = cal.timeInMillis
                                 if (alertMode == TaskAlertMode.NONE) alertMode = TaskAlertMode.CALL
                             },
                             label = { Text("Tomorrow 9 AM") }
                         )
-                        if (reminderTimeMillis > 0L) {
-                            AssistChip(
-                                onClick = {
-                                    reminderTimeMillis = 0L
-                                    alertMode = TaskAlertMode.NONE
-                                },
-                                label = { Text("Clear") }
-                            )
-                        }
                     }
                 }
             }
@@ -469,7 +606,7 @@ fun TaskEditorSheet(
 
             Spacer(modifier = Modifier.height(16.dp))
 
-            // Due Date Quick Presets
+            // Due Date Section with Calendar Picker
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -482,7 +619,7 @@ fun TaskEditorSheet(
                 )
                 if (dueDateMillis > 0L) {
                     val formatted = remember(dueDateMillis) {
-                        SimpleDateFormat("EEE, MMM d", Locale.getDefault()).format(Date(dueDateMillis))
+                        SimpleDateFormat("EEE, MMM d, yyyy", Locale.getDefault()).format(Date(dueDateMillis))
                     }
                     Text(
                         text = "Due $formatted",
@@ -499,6 +636,14 @@ fun TaskEditorSheet(
                     .horizontalScroll(rememberScrollState()),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
+                AssistChip(
+                    onClick = { isDueDateCalendarOpen = true },
+                    label = { Text("Pick Calendar Date...") },
+                    leadingIcon = {
+                        Icon(Icons.Default.CalendarMonth, contentDescription = null, modifier = Modifier.size(16.dp))
+                    },
+                    modifier = Modifier.testTag("open_due_date_calendar_chip")
+                )
                 AssistChip(
                     onClick = { dueDateMillis = System.currentTimeMillis() + 3_600_000L },
                     label = { Text("Today") },
@@ -710,6 +855,369 @@ fun TaskEditorSheet(
                     Text(stringResource(R.string.save_task), fontWeight = FontWeight.Bold)
                 }
             }
+        }
+    }
+
+    if (isClockPickerOpen) {
+        ClockSchedulePickerDialog(
+            initialTimeMillis = reminderTimeMillis,
+            initialAlertMode = if (alertMode == TaskAlertMode.NONE) TaskAlertMode.CALL else alertMode,
+            onDismiss = { isClockPickerOpen = false },
+            onConfirmSchedule = { selectedTimeMillis, selectedMode ->
+                reminderTimeMillis = selectedTimeMillis
+                alertMode = selectedMode
+                if (dueDateMillis <= 0L) {
+                    dueDateMillis = selectedTimeMillis
+                }
+                isClockPickerOpen = false
+            }
+        )
+    }
+
+    if (isDueDateCalendarOpen) {
+        val datePickerState = rememberDatePickerState(
+            initialSelectedDateMillis = if (dueDateMillis > 0L) dueDateMillis else System.currentTimeMillis()
+        )
+        DatePickerDialog(
+            onDismissRequest = { isDueDateCalendarOpen = false },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        val utcMillis = datePickerState.selectedDateMillis ?: System.currentTimeMillis()
+                        val utcCal = Calendar.getInstance(TimeZone.getTimeZone("UTC")).apply {
+                            timeInMillis = utcMillis
+                        }
+                        val localCal = Calendar.getInstance().apply {
+                            set(Calendar.YEAR, utcCal.get(Calendar.YEAR))
+                            set(Calendar.MONTH, utcCal.get(Calendar.MONTH))
+                            set(Calendar.DAY_OF_MONTH, utcCal.get(Calendar.DAY_OF_MONTH))
+                            set(Calendar.HOUR_OF_DAY, 18)
+                            set(Calendar.MINUTE, 0)
+                            set(Calendar.SECOND, 0)
+                            set(Calendar.MILLISECOND, 0)
+                        }
+                        dueDateMillis = localCal.timeInMillis
+                        isDueDateCalendarOpen = false
+                    }
+                ) {
+                    Text("Set Due Date")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { isDueDateCalendarOpen = false }) {
+                    Text("Cancel")
+                }
+            }
+        ) {
+            DatePicker(state = datePickerState)
+        }
+    }
+}
+
+/**
+ * Full Material 3 Clock Dial / Digital Time & Date Picker Dialog so users can schedule
+ * tasks at any exact clock time (HH:MM AM/PM) and calendar date with their preferred Alert Mode.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun ClockSchedulePickerDialog(
+    initialTimeMillis: Long,
+    initialAlertMode: TaskAlertMode = TaskAlertMode.CALL,
+    taskTitle: String? = null,
+    onDismiss: () -> Unit,
+    onConfirmSchedule: (reminderTimeMillis: Long, alertMode: TaskAlertMode) -> Unit
+) {
+    BackHandler { onDismiss() }
+
+    val baseCalendar = remember(initialTimeMillis) {
+        Calendar.getInstance().apply {
+            if (initialTimeMillis > System.currentTimeMillis()) {
+                timeInMillis = initialTimeMillis
+            } else {
+                add(Calendar.MINUTE, 5)
+                set(Calendar.SECOND, 0)
+                set(Calendar.MILLISECOND, 0)
+            }
+        }
+    }
+
+    var selectedYear by remember { mutableIntStateOf(baseCalendar.get(Calendar.YEAR)) }
+    var selectedMonth by remember { mutableIntStateOf(baseCalendar.get(Calendar.MONTH)) }
+    var selectedDay by remember { mutableIntStateOf(baseCalendar.get(Calendar.DAY_OF_MONTH)) }
+    var selectedAlertMode by remember {
+        mutableStateOf(
+            if (initialAlertMode == TaskAlertMode.NONE) TaskAlertMode.CALL else initialAlertMode
+        )
+    }
+    var useKeyboardInput by remember { mutableStateOf(false) }
+    var showCalendarDialog by remember { mutableStateOf(false) }
+
+    val timePickerState = rememberTimePickerState(
+        initialHour = baseCalendar.get(Calendar.HOUR_OF_DAY),
+        initialMinute = baseCalendar.get(Calendar.MINUTE),
+        is24Hour = false
+    )
+
+    val computedScheduleMillis = remember(
+        selectedYear,
+        selectedMonth,
+        selectedDay,
+        timePickerState.hour,
+        timePickerState.minute
+    ) {
+        val cal = Calendar.getInstance().apply {
+            set(Calendar.YEAR, selectedYear)
+            set(Calendar.MONTH, selectedMonth)
+            set(Calendar.DAY_OF_MONTH, selectedDay)
+            set(Calendar.HOUR_OF_DAY, timePickerState.hour)
+            set(Calendar.MINUTE, timePickerState.minute)
+            set(Calendar.SECOND, 0)
+            set(Calendar.MILLISECOND, 0)
+        }
+        // If user left date on Today and selected a time that already passed today, roll to Tomorrow
+        if (cal.timeInMillis <= System.currentTimeMillis()) {
+            val today = Calendar.getInstance()
+            val isSameDayAsToday = selectedYear == today.get(Calendar.YEAR) &&
+                selectedMonth == today.get(Calendar.MONTH) &&
+                selectedDay == today.get(Calendar.DAY_OF_MONTH)
+            if (isSameDayAsToday) {
+                cal.add(Calendar.DAY_OF_YEAR, 1)
+            }
+        }
+        cal.timeInMillis
+    }
+
+    val previewFormatted = remember(computedScheduleMillis) {
+        SimpleDateFormat("EEE, MMM d • h:mm a", Locale.getDefault())
+            .format(Date(computedScheduleMillis))
+    }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "Set Clock Schedule",
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.Bold
+                    )
+                    if (!taskTitle.isNullOrBlank()) {
+                        Text(
+                            text = taskTitle,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1
+                        )
+                    }
+                }
+                IconButton(
+                    onClick = { useKeyboardInput = !useKeyboardInput },
+                    modifier = Modifier.testTag("toggle_clock_input_mode_button")
+                ) {
+                    Icon(
+                        imageVector = if (useKeyboardInput) Icons.Default.AccessTime else Icons.Default.Keyboard,
+                        contentDescription = if (useKeyboardInput) "Switch to clock dial" else "Switch to keyboard time input",
+                        tint = MaterialTheme.colorScheme.primary
+                    )
+                }
+            }
+        },
+        text = {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .verticalScroll(rememberScrollState()),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                // Live Scheduled Preview Banner
+                Surface(
+                    color = EmeraldSync.copy(alpha = 0.15f),
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 12.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Alarm,
+                            contentDescription = null,
+                            tint = EmeraldSync,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = "$previewFormatted (${selectedAlertMode.label})",
+                            style = MaterialTheme.typography.labelLarge,
+                            color = EmeraldSync,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                }
+
+                // Date Selector Row (Today, Tomorrow, Calendar Date)
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    val todayCal = Calendar.getInstance()
+                    val tomorrowCal = Calendar.getInstance().apply { add(Calendar.DAY_OF_YEAR, 1) }
+
+                    val isToday = selectedYear == todayCal.get(Calendar.YEAR) &&
+                        selectedMonth == todayCal.get(Calendar.MONTH) &&
+                        selectedDay == todayCal.get(Calendar.DAY_OF_MONTH)
+                    val isTomorrow = selectedYear == tomorrowCal.get(Calendar.YEAR) &&
+                        selectedMonth == tomorrowCal.get(Calendar.MONTH) &&
+                        selectedDay == tomorrowCal.get(Calendar.DAY_OF_MONTH)
+
+                    FilterChip(
+                        selected = isToday,
+                        onClick = {
+                            val now = Calendar.getInstance()
+                            selectedYear = now.get(Calendar.YEAR)
+                            selectedMonth = now.get(Calendar.MONTH)
+                            selectedDay = now.get(Calendar.DAY_OF_MONTH)
+                        },
+                        label = { Text("Today") }
+                    )
+                    FilterChip(
+                        selected = isTomorrow,
+                        onClick = {
+                            val tom = Calendar.getInstance().apply { add(Calendar.DAY_OF_YEAR, 1) }
+                            selectedYear = tom.get(Calendar.YEAR)
+                            selectedMonth = tom.get(Calendar.MONTH)
+                            selectedDay = tom.get(Calendar.DAY_OF_MONTH)
+                        },
+                        label = { Text("Tomorrow") }
+                    )
+                    AssistChip(
+                        onClick = { showCalendarDialog = true },
+                        label = {
+                            val customCal = Calendar.getInstance().apply {
+                                set(selectedYear, selectedMonth, selectedDay)
+                            }
+                            Text(SimpleDateFormat("MMM d", Locale.getDefault()).format(customCal.time))
+                        },
+                        leadingIcon = {
+                            Icon(
+                                Icons.Default.CalendarMonth,
+                                contentDescription = "Pick date",
+                                modifier = Modifier.size(16.dp)
+                            )
+                        }
+                    )
+                }
+
+                // Material 3 Clock Dial OR Digital Keyboard Time Input
+                if (useKeyboardInput) {
+                    TimeInput(
+                        state = timePickerState,
+                        modifier = Modifier.testTag("clock_time_keyboard_input")
+                    )
+                } else {
+                    TimePicker(
+                        state = timePickerState,
+                        modifier = Modifier.testTag("clock_time_dial_picker")
+                    )
+                }
+
+                // Alert Style Selector Row
+                Column(modifier = Modifier.fillMaxWidth()) {
+                    Text(
+                        text = "How to Notify at this Time:",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        listOf(
+                            TaskAlertMode.CALL,
+                            TaskAlertMode.POPUP,
+                            TaskAlertMode.NOTIFICATION
+                        ).forEach { mode ->
+                            FilterChip(
+                                selected = selectedAlertMode == mode,
+                                onClick = { selectedAlertMode = mode },
+                                label = { Text(mode.label) },
+                                colors = FilterChipDefaults.filterChipColors(
+                                    selectedContainerColor = when (mode) {
+                                        TaskAlertMode.CALL -> EmeraldSync.copy(alpha = 0.22f)
+                                        TaskAlertMode.POPUP -> ElectricIndigo.copy(alpha = 0.22f)
+                                        else -> CyanAccent.copy(alpha = 0.22f)
+                                    }
+                                )
+                            )
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = {
+                    onConfirmSchedule(computedScheduleMillis, selectedAlertMode)
+                },
+                modifier = Modifier.testTag("confirm_clock_schedule_button")
+            ) {
+                Text("Save Schedule", fontWeight = FontWeight.Bold)
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancel")
+            }
+        }
+    )
+
+    if (showCalendarDialog) {
+        val initialCal = Calendar.getInstance().apply {
+            set(selectedYear, selectedMonth, selectedDay)
+        }
+        val datePickerState = rememberDatePickerState(
+            initialSelectedDateMillis = initialCal.timeInMillis
+        )
+        DatePickerDialog(
+            onDismissRequest = { showCalendarDialog = false },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        val utcMillis = datePickerState.selectedDateMillis ?: System.currentTimeMillis()
+                        val utcCal = Calendar.getInstance(TimeZone.getTimeZone("UTC")).apply {
+                            timeInMillis = utcMillis
+                        }
+                        selectedYear = utcCal.get(Calendar.YEAR)
+                        selectedMonth = utcCal.get(Calendar.MONTH)
+                        selectedDay = utcCal.get(Calendar.DAY_OF_MONTH)
+                        showCalendarDialog = false
+                    }
+                ) {
+                    Text("Select Date")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showCalendarDialog = false }) {
+                    Text("Cancel")
+                }
+            }
+        ) {
+            DatePicker(state = datePickerState)
         }
     }
 }

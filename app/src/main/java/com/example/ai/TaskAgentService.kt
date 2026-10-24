@@ -300,14 +300,47 @@ object TaskAgentService {
 
         val triggerNow = lower.contains("now") || lower.contains("instant") || lower.contains("test")
 
-        // Parse "in X sec/min/hour" or "at HH:MM"
+        // Parse "in X sec/min/hour" or clock times like "at 5:30 PM", "5:30 PM", "17:45", "for 8 AM"
         val secRegex = Regex("in\\s+(\\d+)\\s*(sec|second|seconds|s)\\b", RegexOption.IGNORE_CASE)
         val minRegex = Regex("in\\s+(\\d+)\\s*(min|minute|minutes|m)\\b", RegexOption.IGNORE_CASE)
         val hourRegex = Regex("in\\s+(\\d+)\\s*(hr|hour|hours|h)\\b", RegexOption.IGNORE_CASE)
-        val clockRegex = Regex("at\\s+(\\d{1,2})(?::(\\d{2}))?\\s*(am|pm)?", RegexOption.IGNORE_CASE)
+        val clockColonRegex = Regex("(?:(?:at|for|on|by)\\s+)?\\b(\\d{1,2}):(\\d{2})\\s*(am|pm)?\\b", RegexOption.IGNORE_CASE)
+        val clockAmPmRegex = Regex("(?:(?:at|for|on|by)\\s+)?\\b(\\d{1,2})\\s*(am|pm)\\b", RegexOption.IGNORE_CASE)
+        val clockAtHourRegex = Regex("(?:at|for|by)\\s+(\\d{1,2})\\b", RegexOption.IGNORE_CASE)
+
+        fun buildClockMillis(rawHour: Int, rawMinute: Int, ampmRaw: String): Long {
+            var hour = rawHour
+            val ampm = ampmRaw.lowercase()
+            if (ampm == "pm" && hour < 12) hour += 12
+            if (ampm == "am" && hour == 12) hour = 0
+            val cal = Calendar.getInstance().apply {
+                timeInMillis = nowMillis
+                set(Calendar.HOUR_OF_DAY, hour.coerceIn(0, 23))
+                set(Calendar.MINUTE, rawMinute.coerceIn(0, 59))
+                set(Calendar.SECOND, 0)
+                set(Calendar.MILLISECOND, 0)
+            }
+            if (cal.timeInMillis <= nowMillis || lower.contains("tomorrow")) {
+                cal.add(Calendar.DAY_OF_YEAR, 1)
+            }
+            return cal.timeInMillis
+        }
 
         val reminderTimeMillis = when {
             triggerNow -> nowMillis + 4_000L
+            clockColonRegex.containsMatchIn(prompt) -> {
+                val match = clockColonRegex.find(prompt)!!
+                val hour = match.groupValues[1].toIntOrNull() ?: 9
+                val minute = match.groupValues[2].toIntOrNull() ?: 0
+                val ampm = match.groupValues[3]
+                buildClockMillis(hour, minute, ampm)
+            }
+            clockAmPmRegex.containsMatchIn(prompt) -> {
+                val match = clockAmPmRegex.find(prompt)!!
+                val hour = match.groupValues[1].toIntOrNull() ?: 9
+                val ampm = match.groupValues[2]
+                buildClockMillis(hour, 0, ampm)
+            }
             secRegex.containsMatchIn(prompt) -> {
                 val secs = secRegex.find(prompt)?.groupValues?.get(1)?.toLongOrNull() ?: 15L
                 nowMillis + secs.coerceAtLeast(3L) * 1000L
@@ -320,24 +353,10 @@ object TaskAgentService {
                 val hours = hourRegex.find(prompt)?.groupValues?.get(1)?.toLongOrNull() ?: 1L
                 nowMillis + hours.coerceAtLeast(1L) * 3_600_000L
             }
-            clockRegex.containsMatchIn(prompt) -> {
-                val match = clockRegex.find(prompt)!!
-                var hour = match.groupValues[1].toIntOrNull() ?: 9
-                val minute = match.groupValues[2].toIntOrNull() ?: 0
-                val ampm = match.groupValues[3].lowercase()
-                if (ampm == "pm" && hour < 12) hour += 12
-                if (ampm == "am" && hour == 12) hour = 0
-                val cal = Calendar.getInstance().apply {
-                    timeInMillis = nowMillis
-                    set(Calendar.HOUR_OF_DAY, hour.coerceIn(0, 23))
-                    set(Calendar.MINUTE, minute.coerceIn(0, 59))
-                    set(Calendar.SECOND, 0)
-                    set(Calendar.MILLISECOND, 0)
-                }
-                if (cal.timeInMillis <= nowMillis) {
-                    cal.add(Calendar.DAY_OF_YEAR, 1)
-                }
-                cal.timeInMillis
+            clockAtHourRegex.containsMatchIn(prompt) -> {
+                val match = clockAtHourRegex.find(prompt)!!
+                val hour = match.groupValues[1].toIntOrNull() ?: 9
+                buildClockMillis(hour, 0, "")
             }
             else -> nowMillis + 60_000L // Default 1 minute
         }
@@ -348,7 +367,9 @@ object TaskAgentService {
             .replace(secRegex, "")
             .replace(minRegex, "")
             .replace(hourRegex, "")
-            .replace(clockRegex, "")
+            .replace(clockColonRegex, "")
+            .replace(clockAmPmRegex, "")
+            .replace(clockAtHourRegex, "")
             .replace(Regex("with\\s+(a\\s+)?(incoming\\s+)?(call|pop-?up|notification|alert).*", RegexOption.IGNORE_CASE), "")
             .trim()
             .removeSuffix("now")

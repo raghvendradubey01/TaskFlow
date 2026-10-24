@@ -278,6 +278,34 @@ class TaskViewModel(
         }
     }
 
+    fun scheduleTaskClockTime(
+        task: TaskItem,
+        reminderTimeMillis: Long,
+        alertMode: TaskAlertMode
+    ) {
+        viewModelScope.launch {
+            val result = repository.toggleTaskStatus(
+                task = task,
+                completed = false,
+                pinned = task.pinned,
+                reminderTimeMillis = reminderTimeMillis,
+                alertMode = alertMode.name
+            )
+            result.fold(
+                onSuccess = {
+                    val formatted = java.text.SimpleDateFormat(
+                        "EEE, MMM d • h:mm a",
+                        java.util.Locale.getDefault()
+                    ).format(java.util.Date(reminderTimeMillis))
+                    _transientMessage.value = "Scheduled for $formatted (${alertMode.label})"
+                },
+                onFailure = { error ->
+                    _transientMessage.value = error.localizedMessage ?: "Failed to update schedule"
+                }
+            )
+        }
+    }
+
     fun sendAgentCommand(userPrompt: String, availableWorkspaces: List<String>) {
         if (userPrompt.isBlank()) return
         val userMsg = AgentChatMessage(isUser = true, text = userPrompt.trim())

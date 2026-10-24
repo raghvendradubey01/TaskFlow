@@ -37,6 +37,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Sort
+import androidx.compose.material.icons.filled.AccessTime
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Call
@@ -107,6 +108,7 @@ import com.example.data.model.TaskPriority
 import com.example.data.model.WorkspaceItem
 import com.example.notifications.TaskReminderManager
 import com.example.ui.components.AiTaskAgentSheet
+import com.example.ui.components.ClockSchedulePickerDialog
 import com.example.ui.components.CreateWorkspaceDialog
 import com.example.ui.components.HeyTaskFlowOrbOverlay
 import com.example.ui.components.HeyTaskFlowVoiceBanner
@@ -161,6 +163,7 @@ fun TaskDashboardScreen(
     val snackbarHostState = remember { SnackbarHostState() }
     var isEditorOpen by remember { mutableStateOf(false) }
     var editingTask by remember { mutableStateOf<TaskItem?>(null) }
+    var clockSchedulingTask by remember { mutableStateOf<TaskItem?>(null) }
     var isWorkspaceDialogOpen by remember { mutableStateOf(false) }
     var isSyncDialogOpen by remember { mutableStateOf(false) }
     var isAgentSheetOpen by remember { mutableStateOf(false) }
@@ -409,6 +412,7 @@ fun TaskDashboardScreen(
                                 onToggleComplete = viewModel::toggleTaskCompletion,
                                 onTogglePin = viewModel::toggleTaskPin,
                                 onToggleSubtask = viewModel::toggleSubtask,
+                                onScheduleClockTime = { task -> clockSchedulingTask = task },
                                 onTriggerCall = viewModel::triggerManualCall,
                                 onTriggerPopup = viewModel::triggerManualPopup,
                                 onEditTask = { task ->
@@ -534,6 +538,7 @@ fun TaskDashboardScreen(
                                                 onToggleComplete = { viewModel.toggleTaskCompletion(task) },
                                                 onTogglePin = { viewModel.toggleTaskPin(task) },
                                                 onToggleSubtask = { idx -> viewModel.toggleSubtask(task, idx) },
+                                                onScheduleClockTime = { clockSchedulingTask = task },
                                                 onTriggerCall = { viewModel.triggerManualCall(task) },
                                                 onTriggerPopup = { viewModel.triggerManualPopup(task) },
                                                 onEdit = {
@@ -693,6 +698,28 @@ fun TaskDashboardScreen(
             tasks = allTasks,
             onSignOut = onSignOut,
             onDismiss = { isSyncDialogOpen = false }
+        )
+    }
+
+    val schedulingTask = clockSchedulingTask
+    if (schedulingTask != null) {
+        ClockSchedulePickerDialog(
+            initialTimeMillis = schedulingTask.reminderTimeMillis,
+            initialAlertMode = if (schedulingTask.alertModeEnum() == TaskAlertMode.NONE) {
+                TaskAlertMode.CALL
+            } else {
+                schedulingTask.alertModeEnum()
+            },
+            taskTitle = schedulingTask.title,
+            onDismiss = { clockSchedulingTask = null },
+            onConfirmSchedule = { selectedMillis, selectedMode ->
+                viewModel.scheduleTaskClockTime(
+                    task = schedulingTask,
+                    reminderTimeMillis = selectedMillis,
+                    alertMode = selectedMode
+                )
+                clockSchedulingTask = null
+            }
         )
     }
 }
@@ -1135,6 +1162,7 @@ private fun TaskStreamContent(
     onToggleComplete: (TaskItem) -> Unit,
     onTogglePin: (TaskItem) -> Unit,
     onToggleSubtask: (TaskItem, Int) -> Unit,
+    onScheduleClockTime: (TaskItem) -> Unit,
     onTriggerCall: (TaskItem) -> Unit,
     onTriggerPopup: (TaskItem) -> Unit,
     onEditTask: (TaskItem) -> Unit,
@@ -1168,6 +1196,7 @@ private fun TaskStreamContent(
                             onToggleComplete = { onToggleComplete(task) },
                             onTogglePin = { onTogglePin(task) },
                             onToggleSubtask = { idx -> onToggleSubtask(task, idx) },
+                            onScheduleClockTime = { onScheduleClockTime(task) },
                             onTriggerCall = { onTriggerCall(task) },
                             onTriggerPopup = { onTriggerPopup(task) },
                             onEdit = { onEditTask(task) },
@@ -1187,6 +1216,7 @@ private fun TaskItemCard(
     onToggleComplete: () -> Unit,
     onTogglePin: () -> Unit,
     onToggleSubtask: (Int) -> Unit,
+    onScheduleClockTime: () -> Unit,
     onTriggerCall: () -> Unit,
     onTriggerPopup: () -> Unit,
     onEdit: () -> Unit,
@@ -1292,6 +1322,19 @@ private fun TaskItemCard(
                 }
 
                 Row(verticalAlignment = Alignment.CenterVertically) {
+                    IconButton(
+                        onClick = onScheduleClockTime,
+                        modifier = Modifier
+                            .size(38.dp)
+                            .testTag("schedule_clock_${task.id}")
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.AccessTime,
+                            contentDescription = "Set exact clock schedule time",
+                            tint = if (task.reminderTimeMillis > 0L) EmeraldSync else MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
                     IconButton(
                         onClick = onTriggerCall,
                         modifier = Modifier
@@ -1414,22 +1457,20 @@ private fun TaskItemCard(
             ) {
                 if (task.reminderTimeMillis > 0L && task.alertModeEnum() != TaskAlertMode.NONE) {
                     val alertTimeText = remember(task.reminderTimeMillis) {
-                        SimpleDateFormat("h:mm a", Locale.getDefault()).format(Date(task.reminderTimeMillis))
+                        SimpleDateFormat("MMM d • h:mm a", Locale.getDefault()).format(Date(task.reminderTimeMillis))
                     }
                     val modeEnum = task.alertModeEnum()
                     Surface(
                         color = EmeraldSync.copy(alpha = 0.18f),
                         shape = RoundedCornerShape(50),
-                        modifier = Modifier.clickable {
-                            if (modeEnum == TaskAlertMode.CALL) onTriggerCall() else onTriggerPopup()
-                        }
+                        modifier = Modifier.clickable { onScheduleClockTime() }
                     ) {
                         Row(
                             modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Icon(
-                                imageVector = if (modeEnum == TaskAlertMode.CALL) Icons.Default.Call else Icons.Default.NotificationsActive,
+                                imageVector = if (modeEnum == TaskAlertMode.CALL) Icons.Default.Call else Icons.Default.AccessTime,
                                 contentDescription = null,
                                 modifier = Modifier.size(12.dp),
                                 tint = EmeraldSync
@@ -1439,6 +1480,33 @@ private fun TaskItemCard(
                                 text = "${modeEnum.label} • $alertTimeText",
                                 style = MaterialTheme.typography.labelSmall,
                                 color = EmeraldSync
+                            )
+                        }
+                    }
+                } else if (!task.completed) {
+                    Surface(
+                        color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.55f),
+                        shape = RoundedCornerShape(50),
+                        modifier = Modifier
+                            .clickable { onScheduleClockTime() }
+                            .testTag("set_clock_chip_${task.id}")
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.AccessTime,
+                                contentDescription = null,
+                                modifier = Modifier.size(12.dp),
+                                tint = MaterialTheme.colorScheme.primary
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text(
+                                text = "+ Set Clock Time",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.primary,
+                                fontWeight = FontWeight.SemiBold
                             )
                         }
                     }

@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Bold stacked task card and checkmark icon centered within the 66dp safe zone (21..87) -->
+    <path
+        android:fillColor="#38BDF8"
+        android:fillAlpha="0.35"
+        android:pathData="M34,27h40c3.3,0 6,2.7 6,6v42c0,3.3 -2.7,6 -6,6H34c-3.3,0 -6,-2.7 -6,-6V33C28,29.7 30.7,27 34,27z" />
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M30,33h48c3.3,0 6,2.7 6,6v38c0,3.3 -2.7,6 -6,6H30c-3.3,0 -6,-2.7 -6,-6V39C24,35.7 26.7,33 30,33z" />
+    <path
+        android:fillColor="#4F46E5"
+        android:pathData="M48.5,67.5L36.5,55.5l4.2,-4.2l7.8,7.8l18.8,-18.8l4.2,4.2L48.5,67.5z" />
+</vector>

@@ -1,0 +1,17 @@
+<resources>
+    <string name="app_name">TaskFlow</string>
+    <string name="auth_headline">Your Tasks, Every Device</string>
+    <string name="auth_subtitle">Real-time cloud synchronization for projects, subtasks, and priorities across all your Android devices.</string>
+    <string name="sign_in_with_google">Sign in with Google</string>
+    <string name="sync_live_badge">Cloud Synced</string>
+    <string name="search_tasks_hint">Search tasks, notes, or #tags…</string>
+    <string name="new_task_fab">New Task</string>
+    <string name="new_workspace_button">New Workspace</string>
+    <string name="empty_tasks_title">Everything is clear</string>
+    <string name="empty_tasks_subtitle">Create a new task or load sample cross-device tasks to see real-time cloud sync in action.</string>
+    <string name="load_sample_tasks">Load Starter Workspace</string>
+    <string name="sign_out">Sign out</string>
+    <string name="save_task">Save Task</string>
+    <string name="delete_task">Delete Task</string>
+    <string name="cancel">Cancel</string>
+</resources>

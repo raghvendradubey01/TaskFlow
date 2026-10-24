@@ -1,0 +1,145 @@
+{
+  "entities": {
+    "Task": {
+      "title": "Task",
+      "description": "A cloud-synced task item belonging to a specific user, supporting priorities, subtasks, tags, workspace grouping, device sync attribution, and scheduled notification/pop-up/call alerts.",
+      "type": "object",
+      "properties": {
+        "title": {
+          "type": "string",
+          "description": "Task title (1 to 200 characters)."
+        },
+        "notes": {
+          "type": "string",
+          "description": "Detailed notes or description for the task (0 to 2000 characters)."
+        },
+        "completed": {
+          "type": "boolean",
+          "description": "Whether the task is marked as completed."
+        },
+        "priority": {
+          "type": "string",
+          "enum": ["LOW", "MEDIUM", "HIGH", "URGENT"],
+          "description": "Priority level of the task."
+        },
+        "workspaceName": {
+          "type": "string",
+          "description": "Name of the workspace/category this task belongs to (1 to 50 characters)."
+        },
+        "dueDateMillis": {
+          "type": "integer",
+          "description": "Due date in epoch milliseconds, or 0 if no due date is set."
+        },
+        "reminderTimeMillis": {
+          "type": "integer",
+          "description": "Scheduled notification/alert time in epoch milliseconds, or 0 if no reminder is scheduled."
+        },
+        "alertMode": {
+          "type": "string",
+          "enum": ["NONE", "NOTIFICATION", "POPUP", "CALL"],
+          "description": "How the scheduled reminder should alert the user (system notification, pop-up dialog, or incoming AI call)."
+        },
+        "subtasks": {
+          "type": "array",
+          "description": "Bounded list of up to 20 subtask strings formatted as '0|Title' or '1|Title'."
+        },
+        "tags": {
+          "type": "array",
+          "description": "Bounded list of up to 10 tag strings."
+        },
+        "pinned": {
+          "type": "boolean",
+          "description": "Whether the task is pinned to the top of the workspace."
+        },
+        "deviceName": {
+          "type": "string",
+          "description": "Name/model of the device that last synced this task (1 to 100 characters)."
+        },
+        "userId": {
+          "type": "string",
+          "description": "UID of the authenticated owner of this task."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when the task was created (clients must submit FieldValue.serverTimestamp())."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when the task was last updated (clients must submit FieldValue.serverTimestamp())."
+        }
+      },
+      "required": [
+        "title",
+        "notes",
+        "completed",
+        "priority",
+        "workspaceName",
+        "dueDateMillis",
+        "subtasks",
+        "tags",
+        "pinned",
+        "deviceName",
+        "userId",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "Workspace": {
+      "title": "Workspace",
+      "description": "A user-defined project workspace or category synced across devices.",
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Display name of the workspace (1 to 50 characters)."
+        },
+        "colorHex": {
+          "type": "string",
+          "description": "Hex color code for the workspace badge (e.g. #6366F1)."
+        },
+        "iconName": {
+          "type": "string",
+          "description": "Identifier of the workspace icon (1 to 40 characters)."
+        },
+        "userId": {
+          "type": "string",
+          "description": "UID of the authenticated owner of this workspace."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when the workspace was created (clients must submit FieldValue.serverTimestamp())."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when the workspace was last updated (clients must submit FieldValue.serverTimestamp())."
+        }
+      },
+      "required": [
+        "name",
+        "colorHex",
+        "iconName",
+        "userId",
+        "createdAt",
+        "updatedAt"
+      ]
+    }
+  },
+  "firestore": {
+    "/users/{userId}/tasks/{taskId}": {
+      "schema": {
+        "$ref": "#/entities/Task"
+      },
+      "description": "Per-user subcollection of cloud-synced tasks."
+    },
+    "/users/{userId}/workspaces/{workspaceId}": {
+      "schema": {
+        "$ref": "#/entities/Workspace"
+      },
+      "description": "Per-user subcollection of cloud-synced workspaces/projects."
+    }
+  }
+}

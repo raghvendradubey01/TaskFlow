@@ -1,0 +1,6 @@
+{
+  "name": "TaskFlow",
+  "description": "Cloud-synced task and project management across all your devices with real-time updates, priorities, subtasks, and tags.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

@@ -1,0 +1,159 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // 1. Global Safety Net: Default-deny catch-all
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // 2. Hardened Global Primitives
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    // 3. Entity Validation Blueprints
+    function isValidTask(data) {
+      return data.keys().hasAll([
+               'title', 'notes', 'completed', 'priority', 'workspaceName',
+               'dueDateMillis', 'subtasks', 'tags', 'pinned', 'deviceName',
+               'userId', 'createdAt', 'updatedAt'
+             ]) &&
+             data.keys().hasOnly([
+               'title', 'notes', 'completed', 'priority', 'workspaceName',
+               'dueDateMillis', 'reminderTimeMillis', 'alertMode',
+               'subtasks', 'tags', 'pinned', 'deviceName',
+               'userId', 'createdAt', 'updatedAt'
+             ]) &&
+             data.title is string && data.title.size() >= 1 && data.title.size() <= 200 &&
+             data.notes is string && data.notes.size() <= 2000 &&
+             data.completed is bool &&
+             data.priority is string && data.priority.size() <= 20 &&
+             data.priority in ['LOW', 'MEDIUM', 'HIGH', 'URGENT'] &&
+             data.workspaceName is string && data.workspaceName.size() >= 1 && data.workspaceName.size() <= 50 &&
+             data.dueDateMillis is int && data.dueDateMillis >= 0 &&
+             (!('reminderTimeMillis' in data) || (data.reminderTimeMillis is int && data.reminderTimeMillis >= 0)) &&
+             (!('alertMode' in data) || (data.alertMode is string && data.alertMode.size() <= 20 && data.alertMode in ['NONE', 'NOTIFICATION', 'POPUP', 'CALL'])) &&
+             data.subtasks is list && data.subtasks.size() <= 20 &&
+             (data.subtasks.size() == 0 || (data.subtasks[0] is string && data.subtasks[0].size() <= 200)) &&
+             data.tags is list && data.tags.size() <= 10 &&
+             (data.tags.size() == 0 || (data.tags[0] is string && data.tags[0].size() <= 40)) &&
+             data.pinned is bool &&
+             data.deviceName is string && data.deviceName.size() >= 1 && data.deviceName.size() <= 100 &&
+             data.userId is string && data.userId.size() >= 1 && data.userId.size() <= 128 &&
+             data.userId == request.auth.uid &&
+             data.createdAt is timestamp && data.createdAt <= request.time &&
+             data.updatedAt is timestamp && data.updatedAt <= request.time;
+    }
+
+    function isValidWorkspace(data) {
+      return data.keys().hasAll([
+               'name', 'colorHex', 'iconName', 'userId', 'createdAt', 'updatedAt'
+             ]) &&
+             data.keys().hasOnly([
+               'name', 'colorHex', 'iconName', 'userId', 'createdAt', 'updatedAt'
+             ]) &&
+             data.name is string && data.name.size() >= 1 && data.name.size() <= 50 &&
+             data.colorHex is string && data.colorHex.size() == 7 &&
+             data.colorHex.matches('^#[0-9A-Fa-f]{6}$') &&
+             data.iconName is string && data.iconName.size() >= 1 && data.iconName.size() <= 40 &&
+             data.userId is string && data.userId.size() >= 1 && data.userId.size() <= 128 &&
+             data.userId == request.auth.uid &&
+             data.createdAt is timestamp && data.createdAt <= request.time &&
+             data.updatedAt is timestamp && data.updatedAt <= request.time;
+    }
+
+    // 4. Per-User Tasks Subcollection
+    match /users/{userId}/tasks/{taskId} {
+      allow get: if isSignedIn() &&
+                    request.auth.uid == userId &&
+                    isValidId(userId) &&
+                    isValidId(taskId) &&
+                    existing().userId == request.auth.uid;
+
+      allow list: if isSignedIn() &&
+                     request.auth.uid == userId &&
+                     existing().userId == request.auth.uid;
+
+      allow create: if isSignedIn() &&
+                       isValidTask(incoming()) &&
+                       request.auth.uid == userId &&
+                       isValidId(userId) &&
+                       isValidId(taskId);
+
+      allow update: if isSignedIn() &&
+                       isValidTask(incoming()) &&
+                       request.auth.uid == userId &&
+                       isValidId(userId) &&
+                       isValidId(taskId) &&
+                       existing().userId == request.auth.uid &&
+                       incoming().userId == existing().userId &&
+                       incoming().createdAt == existing().createdAt && (
+                         // Action: Status / Pin / Reminder Toggle
+                         incoming().diff(existing()).affectedKeys().hasOnly([
+                           'completed', 'pinned', 'reminderTimeMillis', 'alertMode', 'deviceName', 'updatedAt'
+                         ]) ||
+                         // Action: Full Content Edit
+                         incoming().diff(existing()).affectedKeys().hasOnly([
+                           'title', 'notes', 'completed', 'priority', 'workspaceName',
+                           'dueDateMillis', 'reminderTimeMillis', 'alertMode',
+                           'subtasks', 'tags', 'pinned', 'deviceName', 'updatedAt'
+                         ])
+                       );
+
+      allow delete: if isSignedIn() &&
+                       request.auth.uid == userId &&
+                       isValidId(userId) &&
+                       isValidId(taskId) &&
+                       existing().userId == request.auth.uid;
+    }
+
+    // 5. Per-User Workspaces Subcollection
+    match /users/{userId}/workspaces/{workspaceId} {
+      allow get: if isSignedIn() &&
+                    request.auth.uid == userId &&
+                    isValidId(userId) &&
+                    isValidId(workspaceId) &&
+                    existing().userId == request.auth.uid;
+
+      allow list: if isSignedIn() &&
+                     request.auth.uid == userId &&
+                     existing().userId == request.auth.uid;
+
+      allow create: if isSignedIn() &&
+                       isValidWorkspace(incoming()) &&
+                       request.auth.uid == userId &&
+                       isValidId(userId) &&
+                       isValidId(workspaceId);
+
+      allow update: if isSignedIn() &&
+                       isValidWorkspace(incoming()) &&
+                       request.auth.uid == userId &&
+                       isValidId(userId) &&
+                       isValidId(workspaceId) &&
+                       existing().userId == request.auth.uid &&
+                       incoming().userId == existing().userId &&
+                       incoming().createdAt == existing().createdAt && (
+                         // Action: Update workspace metadata
+                         incoming().diff(existing()).affectedKeys().hasOnly(['name', 'colorHex', 'iconName', 'updatedAt'])
+                       );
+
+      allow delete: if isSignedIn() &&
+                       request.auth.uid == userId &&
+                       isValidId(userId) &&
+                       isValidId(workspaceId) &&
+                       existing().userId == request.auth.uid;
+    }
+  }
+}

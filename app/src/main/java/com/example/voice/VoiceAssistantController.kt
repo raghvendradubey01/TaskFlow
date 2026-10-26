@@ -31,7 +31,7 @@ object VoiceAssistantController {
     val liveTranscript: StateFlow<String> = _liveTranscript.asStateFlow()
 
     private val _statusMessage = MutableStateFlow(
-        "Tap to enable \"Hey TaskFlow\" hands-free voice assistant"
+        "Say \"Hey TaskFlow\" anytime to wake voice assistant"
     )
     val statusMessage: StateFlow<String> = _statusMessage.asStateFlow()
 
@@ -41,9 +41,18 @@ object VoiceAssistantController {
     private val _isOverlayVisible = MutableStateFlow(false)
     val isOverlayVisible: StateFlow<Boolean> = _isOverlayVisible.asStateFlow()
 
+    private val _micRmsLevel = MutableStateFlow(0f)
+    val micRmsLevel: StateFlow<Float> = _micRmsLevel.asStateFlow()
+
+    // Exact & phonetic wake-word phrases recognized by Android SpeechRecognizer
     private val wakeWordPatterns = listOf(
         "hey taskflow",
         "hey task flow",
+        "hey task floor",
+        "hey task for",
+        "hey task full",
+        "hey task pro",
+        "hey task slow",
         "hi taskflow",
         "hi task flow",
         "okay taskflow",
@@ -53,10 +62,28 @@ object VoiceAssistantController {
         "hello taskflow",
         "hello task flow",
         "hey tax flow",
+        "hey tax floor",
         "hey test flow",
+        "hey text flow",
         "hey tech flow",
+        "hey pass flow",
+        "hey fast flow",
+        "hey ask flow",
+        "a task flow",
+        "hey task",
+        "hi task",
+        "ok task",
+        "okay task",
         "taskflow",
-        "task flow"
+        "task flow",
+        "hey siri",
+        "ok google",
+        "alexa"
+    )
+
+    // Fuzzy regex to catch any accent/phonetic transcription of "Hey TaskFlow"
+    private val fuzzyWakeWordRegex = Regex(
+        pattern = """(?i)\b(?:(?:hey|hi|hello|ok|okay|yo|a)\s+)?(?:task|tax|test|tech|text|pass|fast|ask|das)\s*(?:flow|floor|for|full|pro|slow|go|low|glow)\b|\b(?:hey|hi|hello|ok|okay)\s+(?:task|tax|test|tech)\b"""
     )
 
     fun hasRecordAudioPermission(context: Context): Boolean {
@@ -69,7 +96,7 @@ object VoiceAssistantController {
     fun startBackgroundAssistant(context: Context, wakeImmediately: Boolean = false) {
         if (!hasRecordAudioPermission(context)) {
             _assistantState.value = VoiceAssistantState.ERROR
-            _statusMessage.value = "Microphone permission is required for 'Hey TaskFlow'"
+            _statusMessage.value = "Grant Microphone permission to enable \"Hey TaskFlow\""
             return
         }
         val appContext = context.applicationContext
@@ -105,6 +132,7 @@ object VoiceAssistantController {
         _isServiceEnabled.value = false
         _assistantState.value = VoiceAssistantState.OFF
         _liveTranscript.value = ""
+        _micRmsLevel.value = 0f
         _isOverlayVisible.value = false
         _statusMessage.value = "Tap to enable \"Hey TaskFlow\" hands-free voice assistant"
     }
@@ -141,6 +169,7 @@ object VoiceAssistantController {
     fun dismissOverlay() {
         _isOverlayVisible.value = false
         _lastCreatedTask.value = null
+        _micRmsLevel.value = 0f
         if (_isServiceEnabled.value && _assistantState.value == VoiceAssistantState.AWAITING_COMMAND) {
             _assistantState.value = VoiceAssistantState.LISTENING_WAKE_WORD
             _statusMessage.value = "Listening for \"Hey TaskFlow\" in background..."
@@ -164,6 +193,11 @@ object VoiceAssistantController {
         _lastCreatedTask.value = createdTask
     }
 
+    internal fun updateMicRms(rmsdB: Float) {
+        val normalized = ((rmsdB + 2f) / 12f).coerceIn(0f, 1f)
+        _micRmsLevel.value = normalized
+    }
+
     internal fun setServiceRunning(running: Boolean) {
         _isServiceEnabled.value = running
     }
@@ -174,7 +208,9 @@ object VoiceAssistantController {
      */
     fun extractWakeWordCommand(spokenText: String): Pair<Boolean, String> {
         val normalized = spokenText.trim()
+        if (normalized.isBlank()) return false to ""
         val lower = normalized.lowercase()
+
         for (pattern in wakeWordPatterns) {
             val idx = lower.indexOf(pattern)
             if (idx >= 0) {
@@ -185,6 +221,20 @@ object VoiceAssistantController {
                 return true to remainder
             }
         }
+
+        val regexMatch = fuzzyWakeWordRegex.find(normalized)
+        if (regexMatch != null) {
+            val afterIndex = regexMatch.range.last + 1
+            val remainder = if (afterIndex < normalized.length) {
+                normalized.substring(afterIndex)
+                    .trimStart(',', '.', '!', '?', ':', ';', '-', ' ')
+                    .trim()
+            } else {
+                ""
+            }
+            return true to remainder
+        }
+
         return false to ""
     }
 }

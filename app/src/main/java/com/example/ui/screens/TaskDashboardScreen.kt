@@ -1,7 +1,10 @@
 package com.example.ui.screens
 
 import android.Manifest
+import android.app.Activity
+import android.content.Intent
 import android.os.Build
+import android.speech.RecognizerIntent
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
@@ -159,6 +162,7 @@ fun TaskDashboardScreen(
     val voiceStatusMessage by VoiceAssistantController.statusMessage.collectAsStateWithLifecycle()
     val voiceLastCreatedTask by VoiceAssistantController.lastCreatedTask.collectAsStateWithLifecycle()
     val isVoiceOverlayVisible by VoiceAssistantController.isOverlayVisible.collectAsStateWithLifecycle()
+    val voiceMicRmsLevel by VoiceAssistantController.micRmsLevel.collectAsStateWithLifecycle()
 
     val snackbarHostState = remember { SnackbarHostState() }
     var isEditorOpen by remember { mutableStateOf(false) }
@@ -181,20 +185,64 @@ fun TaskDashboardScreen(
         wakeImmediatelyAfterPermission = false
     }
 
-    val notificationPermissionLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.RequestPermission()
-    ) { _ ->
-        if (VoiceAssistantController.hasRecordAudioPermission(context)) {
+    val startupPermissionsLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestMultiplePermissions()
+    ) { permissions ->
+        val micGranted = permissions[Manifest.permission.RECORD_AUDIO] == true ||
+            VoiceAssistantController.hasRecordAudioPermission(context)
+        if (micGranted) {
             VoiceAssistantController.startBackgroundAssistant(context)
+        }
+    }
+
+    val systemVoiceRecognizerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        if (result.resultCode == Activity.RESULT_OK) {
+            val matches = result.data
+                ?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)
+                .orEmpty()
+            val spokenText = matches.firstOrNull()?.trim().orEmpty()
+            if (spokenText.isNotBlank()) {
+                val (matched, remainder) = VoiceAssistantController.extractWakeWordCommand(spokenText)
+                val finalCommand = if (matched && remainder.isNotBlank()) remainder else spokenText
+                VoiceAssistantController.submitSimulatedOrTypedVoiceCommand(context, finalCommand)
+            }
+        }
+    }
+
+    val launchSystemSpeechDialog = {
+        try {
+            val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+                putExtra(
+                    RecognizerIntent.EXTRA_LANGUAGE_MODEL,
+                    RecognizerIntent.LANGUAGE_MODEL_FREE_FORM
+                )
+                putExtra(RecognizerIntent.EXTRA_LANGUAGE, Locale.getDefault())
+                putExtra(
+                    RecognizerIntent.EXTRA_PROMPT,
+                    "Say your TaskFlow command (e.g., 'Call me at 5 PM for meeting')"
+                )
+            }
+            systemVoiceRecognizerLauncher.launch(intent)
+        } catch (_: Exception) {
+            VoiceAssistantController.triggerWakeNow(context)
         }
     }
 
     LaunchedEffect(Unit) {
         TaskReminderManager.ensureNotificationChannel(context)
+        val permissionsToRequest = mutableListOf<String>()
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
             !TaskReminderManager.hasNotificationPermission(context)
         ) {
-            notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+            permissionsToRequest.add(Manifest.permission.POST_NOTIFICATIONS)
+        }
+        if (!VoiceAssistantController.hasRecordAudioPermission(context)) {
+            permissionsToRequest.add(Manifest.permission.RECORD_AUDIO)
+        }
+        if (permissionsToRequest.isNotEmpty()) {
+            startupPermissionsLauncher.launch(permissionsToRequest.toTypedArray())
         }
         if (VoiceAssistantController.hasRecordAudioPermission(context)) {
             VoiceAssistantController.startBackgroundAssistant(context)
@@ -357,6 +405,7 @@ fun TaskDashboardScreen(
                                 isServiceEnabled = isVoiceServiceEnabled,
                                 assistantState = voiceAssistantState,
                                 statusMessage = voiceStatusMessage,
+                                micRmsLevel = voiceMicRmsLevel,
                                 onToggleBackgroundService = { enable ->
                                     if (enable) {
                                         if (VoiceAssistantController.hasRecordAudioPermission(context)) {
@@ -454,6 +503,7 @@ fun TaskDashboardScreen(
                                     isServiceEnabled = isVoiceServiceEnabled,
                                     assistantState = voiceAssistantState,
                                     statusMessage = voiceStatusMessage,
+                                    micRmsLevel = voiceMicRmsLevel,
                                     onToggleBackgroundService = { enable ->
                                         if (enable) {
                                             if (VoiceAssistantController.hasRecordAudioPermission(context)) {
@@ -563,6 +613,7 @@ fun TaskDashboardScreen(
                 assistantState = voiceAssistantState,
                 liveTranscript = voiceLiveTranscript,
                 statusMessage = voiceStatusMessage,
+                micRmsLevel = voiceMicRmsLevel,
                 lastCreatedTask = voiceLastCreatedTask,
                 onStartListeningNow = {
                     if (VoiceAssistantController.hasRecordAudioPermission(context)) {
@@ -572,6 +623,7 @@ fun TaskDashboardScreen(
                         audioPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
                     }
                 },
+                onLaunchSystemVoiceRecognizer = launchSystemSpeechDialog,
                 onSubmitVoiceCommandText = { cmd ->
                     VoiceAssistantController.submitSimulatedOrTypedVoiceCommand(context, cmd)
                 },

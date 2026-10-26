@@ -30,6 +30,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Send
+import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Call
 import androidx.compose.material.icons.filled.CheckCircle
@@ -37,6 +38,7 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.MicOff
+import androidx.compose.material.icons.filled.RecordVoiceOver
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -83,6 +85,7 @@ fun HeyTaskFlowVoiceBanner(
     isServiceEnabled: Boolean,
     assistantState: VoiceAssistantState,
     statusMessage: String,
+    micRmsLevel: Float = 0f,
     onToggleBackgroundService: (Boolean) -> Unit,
     onSpeakNowClick: () -> Unit
 ) {
@@ -96,6 +99,8 @@ fun HeyTaskFlowVoiceBanner(
         ),
         label = "pulse_alpha"
     )
+
+    val dynamicBoost = (micRmsLevel * 0.45f).coerceIn(0f, 0.45f)
 
     Card(
         shape = MaterialTheme.shapes.medium,
@@ -144,7 +149,7 @@ fun HeyTaskFlowVoiceBanner(
                             .clip(CircleShape)
                             .background(
                                 if (isServiceEnabled) {
-                                    CyanAccent.copy(alpha = pulseAlpha * 0.3f)
+                                    CyanAccent.copy(alpha = (pulseAlpha * 0.3f + dynamicBoost).coerceAtMost(0.9f))
                                 } else {
                                     Color.White.copy(alpha = 0.1f)
                                 }
@@ -152,7 +157,11 @@ fun HeyTaskFlowVoiceBanner(
                         contentAlignment = Alignment.Center
                     ) {
                         Icon(
-                            imageVector = if (isServiceEnabled) Icons.Default.GraphicEq else Icons.Default.Mic,
+                            imageVector = when (assistantState) {
+                                VoiceAssistantState.SPEAKING_RESPONSE -> Icons.AutoMirrored.Filled.VolumeUp
+                                VoiceAssistantState.AWAITING_COMMAND -> Icons.Default.RecordVoiceOver
+                                else -> if (isServiceEnabled) Icons.Default.GraphicEq else Icons.Default.Mic
+                            },
                             contentDescription = "Hey TaskFlow Voice Assistant",
                             tint = if (isServiceEnabled) CyanAccent else Color.White,
                             modifier = Modifier.size(24.dp)
@@ -180,8 +189,9 @@ fun HeyTaskFlowVoiceBanner(
                             ) {
                                 Text(
                                     text = when {
-                                        assistantState == VoiceAssistantState.AWAITING_COMMAND -> "RECORDING"
-                                        isServiceEnabled -> "BACKGROUND ON"
+                                        assistantState == VoiceAssistantState.AWAITING_COMMAND -> "TAKE COMMAND"
+                                        assistantState == VoiceAssistantState.SPEAKING_RESPONSE -> "SPEAKING"
+                                        isServiceEnabled -> "LISTENING"
                                         else -> "OFF"
                                     },
                                     style = MaterialTheme.typography.labelSmall,
@@ -194,7 +204,7 @@ fun HeyTaskFlowVoiceBanner(
                         Text(
                             text = statusMessage,
                             style = MaterialTheme.typography.bodySmall,
-                            color = Color.White.copy(alpha = 0.8f),
+                            color = Color.White.copy(alpha = 0.85f),
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis
                         )
@@ -219,7 +229,7 @@ fun HeyTaskFlowVoiceBanner(
                     ) {
                         Icon(
                             imageVector = Icons.Default.Mic,
-                            contentDescription = "Speak Task Now",
+                            contentDescription = "Wake Hey TaskFlow & Speak Command",
                             modifier = Modifier.size(20.dp)
                         )
                     }
@@ -244,8 +254,10 @@ fun HeyTaskFlowOrbOverlay(
     assistantState: VoiceAssistantState,
     liveTranscript: String,
     statusMessage: String,
+    micRmsLevel: Float = 0f,
     lastCreatedTask: TaskItem?,
     onStartListeningNow: () -> Unit,
+    onLaunchSystemVoiceRecognizer: (() -> Unit)? = null,
     onSubmitVoiceCommandText: (String) -> Unit,
     onPreviewCallForTask: (TaskItem) -> Unit,
     onDismiss: () -> Unit
@@ -259,7 +271,7 @@ fun HeyTaskFlowOrbOverlay(
         initialValue = 0.85f,
         targetValue = 1.35f,
         animationSpec = infiniteRepeatable(
-            animation = tween(1100, easing = FastOutSlowInEasing),
+            animation = tween(950, easing = FastOutSlowInEasing),
             repeatMode = RepeatMode.Reverse
         ),
         label = "outer_wave"
@@ -268,17 +280,19 @@ fun HeyTaskFlowOrbOverlay(
         initialValue = 1.15f,
         targetValue = 0.8f,
         animationSpec = infiniteRepeatable(
-            animation = tween(850, easing = FastOutSlowInEasing),
+            animation = tween(750, easing = FastOutSlowInEasing),
             repeatMode = RepeatMode.Reverse
         ),
         label = "inner_wave"
     )
 
+    val voiceBoost = 1f + (micRmsLevel * 0.45f)
+
     val quickVoiceExamples = listOf(
         "Call me in 1 minute to review client report",
+        "Call me at 5:30 PM for team standup",
         "Pop up alert in 2 minutes to take medicine",
-        "Call me now to test my urgent presentation briefing",
-        "Notify me in 5 minutes to check deployment status"
+        "Call me now to test my urgent presentation briefing"
     )
 
     Box(
@@ -303,7 +317,7 @@ fun HeyTaskFlowOrbOverlay(
                     .fillMaxWidth()
                     .padding(20.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(14.dp)
+                verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
                 // Header Row
                 Row(
@@ -338,7 +352,34 @@ fun HeyTaskFlowOrbOverlay(
                     }
                 }
 
-                // Glowing Siri / Gemini Live Multi-Wave Orb
+                // State Badge (Siri / Alexa Mode Indicator)
+                Surface(
+                    color = when (assistantState) {
+                        VoiceAssistantState.AWAITING_COMMAND -> EmeraldSync.copy(alpha = 0.2f)
+                        VoiceAssistantState.SPEAKING_RESPONSE -> CyanAccent.copy(alpha = 0.2f)
+                        else -> ElectricIndigo.copy(alpha = 0.25f)
+                    },
+                    shape = RoundedCornerShape(50)
+                ) {
+                    Text(
+                        text = when (assistantState) {
+                            VoiceAssistantState.AWAITING_COMMAND -> "ACTIVE • SPEAK YOUR COMMAND NOW"
+                            VoiceAssistantState.SPEAKING_RESPONSE -> "SPEAKING AUDIO RESPONSE..."
+                            VoiceAssistantState.PROCESSING -> "SCHEDULING YOUR TASK..."
+                            else -> "WAKE WORD READY • SAY \"HEY TASKFLOW\""
+                        },
+                        style = MaterialTheme.typography.labelSmall,
+                        color = when (assistantState) {
+                            VoiceAssistantState.AWAITING_COMMAND -> EmeraldSync
+                            VoiceAssistantState.SPEAKING_RESPONSE -> CyanAccent
+                            else -> Color.White
+                        },
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp)
+                    )
+                }
+
+                // Glowing Siri / Alexa Multi-Wave Orb reactive to live microphone audio
                 Box(
                     modifier = Modifier
                         .size(132.dp)
@@ -350,20 +391,20 @@ fun HeyTaskFlowOrbOverlay(
                         drawCircle(
                             brush = Brush.radialGradient(
                                 colors = listOf(
-                                    CyanAccent.copy(alpha = 0.42f),
+                                    CyanAccent.copy(alpha = 0.45f),
                                     ElectricIndigo.copy(alpha = 0.05f)
                                 )
                             ),
-                            radius = baseRadius * outerWave
+                            radius = baseRadius * outerWave * voiceBoost
                         )
                         drawCircle(
                             brush = Brush.radialGradient(
                                 colors = listOf(
-                                    EmeraldSync.copy(alpha = 0.45f),
-                                    ElectricIndigo.copy(alpha = 0.1f)
+                                    EmeraldSync.copy(alpha = 0.48f),
+                                    ElectricIndigo.copy(alpha = 0.12f)
                                 )
                             ),
-                            radius = baseRadius * innerWave
+                            radius = baseRadius * innerWave * voiceBoost
                         )
                     }
 
@@ -381,7 +422,7 @@ fun HeyTaskFlowOrbOverlay(
                         Icon(
                             imageVector = when (assistantState) {
                                 VoiceAssistantState.OFF, VoiceAssistantState.ERROR -> Icons.Default.MicOff
-                                VoiceAssistantState.SPEAKING_RESPONSE -> Icons.Default.CheckCircle
+                                VoiceAssistantState.SPEAKING_RESPONSE -> Icons.AutoMirrored.Filled.VolumeUp
                                 else -> Icons.Default.Mic
                             },
                             contentDescription = "Tap to Speak",
@@ -416,11 +457,46 @@ fun HeyTaskFlowOrbOverlay(
                     }
                 } else {
                     Text(
-                        text = "Say: \"Hey TaskFlow, call me in 1 minute to check the deployment\"",
+                        text = "Say: \"Hey TaskFlow\" -> wait for chime -> \"Call me at 5:00 PM for meeting\"",
                         style = MaterialTheme.typography.bodySmall,
-                        color = Color.White.copy(alpha = 0.65f),
+                        color = Color.White.copy(alpha = 0.68f),
                         textAlign = TextAlign.Center
                     )
+                }
+
+                // Action Row: Re-Wake / System Voice Recognizer Option
+                if (onLaunchSystemVoiceRecognizer != null) {
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        OutlinedButton(
+                            onClick = onStartListeningNow,
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.RecordVoiceOver,
+                                contentDescription = null,
+                                tint = CyanAccent,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Wake & Listen", color = Color.White)
+                        }
+                        OutlinedButton(
+                            onClick = onLaunchSystemVoiceRecognizer,
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Mic,
+                                contentDescription = null,
+                                tint = EmeraldSync,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("System Voice Mic", color = Color.White)
+                        }
+                    }
                 }
 
                 // Created Task Confirmation Card

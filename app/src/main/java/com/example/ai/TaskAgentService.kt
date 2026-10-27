@@ -1,63 +1,21 @@
 package com.example.ai
 
-import com.example.BuildConfig
 import com.example.data.model.TaskAlertMode
 import com.example.data.model.TaskPriority
+import com.google.firebase.Firebase
+import com.google.firebase.ai.ai
+import com.google.firebase.ai.type.Schema
+import com.google.firebase.ai.type.content
+import com.google.firebase.ai.type.generationConfig
 import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Date
 import java.util.Locale
-import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeout
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
-import kotlinx.serialization.json.JsonObject
-import kotlinx.serialization.json.buildJsonObject
-import kotlinx.serialization.json.put
-import kotlinx.serialization.json.putJsonArray
-import kotlinx.serialization.json.putJsonObject
-import okhttp3.MediaType.Companion.toMediaType
-import okhttp3.OkHttpClient
-import retrofit2.Retrofit
-import retrofit2.converter.kotlinx.serialization.asConverterFactory
-import retrofit2.http.Body
-import retrofit2.http.POST
-import retrofit2.http.Query
-
-@Serializable
-data class GenerateContentRequest(
-    val contents: List<Content>,
-    val generationConfig: GenerationConfig? = null,
-    val systemInstruction: Content? = null
-)
-
-@Serializable
-data class Content(
-    val parts: List<Part>
-)
-
-@Serializable
-data class Part(
-    val text: String? = null
-)
-
-@Serializable
-data class GenerationConfig(
-    val responseMimeType: String? = null,
-    val responseSchema: JsonObject? = null,
-    val temperature: Float? = null
-)
-
-@Serializable
-data class GenerateContentResponse(
-    val candidates: List<Candidate> = emptyList()
-)
-
-@Serializable
-data class Candidate(
-    val content: Content? = null
-)
 
 @Serializable
 data class ParsedAgentTaskPlan(
@@ -87,16 +45,9 @@ data class ResolvedAgentTaskAction(
     val triggerImmediately: Boolean = false
 )
 
-interface GeminiApiService {
-    @POST("v1beta/models/gemini-3.5-flash:generateContent")
-    suspend fun generateContent(
-        @Query("key") apiKey: String,
-        @Body request: GenerateContentRequest
-    ): GenerateContentResponse
-}
-
 object TaskAgentService {
-    private const val BASE_URL = "https://generativelanguage.googleapis.com/"
+    private const val MODEL_NAME = "gemini-3.8-flash"
+    private const val INFERENCE_TIMEOUT_MS = 60_000L
 
     private val jsonFormat = Json {
         ignoreUnknownKeys = true
@@ -104,21 +55,69 @@ object TaskAgentService {
         coerceInputValues = true
     }
 
-    private val okHttpClient: OkHttpClient by lazy {
-        OkHttpClient.Builder()
-            .connectTimeout(60, TimeUnit.SECONDS)
-            .readTimeout(60, TimeUnit.SECONDS)
-            .writeTimeout(60, TimeUnit.SECONDS)
-            .build()
+    private val taskPlanResponseSchema: Schema by lazy {
+        Schema.obj(
+            mapOf(
+                "title" to Schema.str("Concise task title extracted from the user's request."),
+                "notes" to Schema.str("Helpful context or reminder notes for the task."),
+                "priority" to Schema.enumeration(
+                    listOf("LOW", "MEDIUM", "HIGH", "URGENT"),
+                    "Task priority level."
+                ),
+                "workspaceName" to Schema.str("Best matching workspace name for the task."),
+                "delaySeconds" to Schema.long(
+                    "Number of seconds from now to trigger the alert if relative time is used (e.g. 'in 1 minute' = 60, 'now' = 5). Use 0 if a specific clock time is given."
+                ),
+                "targetHour24" to Schema.integer(
+                    "24-hour clock hour (0-23) if user specified an exact clock time like 'at 5:30 PM', otherwise -1."
+                ),
+                "targetMinute" to Schema.integer(
+                    "Clock minute (0-59) if user specified an exact clock time, otherwise -1."
+                ),
+                "alertMode" to Schema.enumeration(
+                    listOf("CALL", "POPUP", "NOTIFICATION"),
+                    "CALL if user asks for a call/ring/phone alert, POPUP if user asks for a pop-up/dialog, or NOTIFICATION for standard alert."
+                ),
+                "subtasks" to Schema.array(
+                    Schema.str("Actionable checklist item"),
+                    "2 to 3 actionable checklist steps for the task."
+                ),
+                "tags" to Schema.array(
+                    Schema.str("Short lowercase tag"),
+                    "1 or 2 short lowercase tags."
+                ),
+                "agentReply" to Schema.str(
+                    "Friendly confirmation message explaining what task was added, when it will trigger, and whether it will ring as a Call, Pop-Up, or Notification."
+                )
+            )
+        )
     }
 
-    private val apiService: GeminiApiService by lazy {
-        Retrofit.Builder()
-            .baseUrl(BASE_URL)
-            .client(okHttpClient)
-            .addConverterFactory(jsonFormat.asConverterFactory("application/json".toMediaType()))
-            .build()
-            .create(GeminiApiService::class.java)
+    /**
+     * Initialized lazily so Firebase.ai.generativeModel is only accessed after
+     * configureAppCheck(this, intent) has run in MainActivity.onCreate().
+     */
+    private val generativeModel by lazy {
+        Firebase.ai.generativeModel(
+            modelName = MODEL_NAME,
+            generationConfig = generationConfig {
+                responseMimeType = "application/json"
+                responseSchema = taskPlanResponseSchema
+                temperature = 0.2f
+            },
+            systemInstruction = content {
+                text(
+                    """
+                    You are the TaskFlow AI Reminder & Call Agent.
+                    Extract the user's task, schedule time, and preferred alert style:
+                    - If they mention "call", "ring", "getting a call", or "voice", set alertMode to "CALL".
+                    - If they mention "pop up", "popup", "modal", or "screen alert", set alertMode to "POPUP".
+                    - Otherwise, if they ask to notify/remind without specifying, default to "CALL" or "POPUP" based on urgency.
+                    Always generate 2-3 helpful subtasks and a warm, concise agentReply.
+                    """.trimIndent()
+                )
+            }
+        )
     }
 
     suspend fun parseUserReminderRequest(
@@ -127,106 +126,24 @@ object TaskAgentService {
     ): ResolvedAgentTaskAction = withContext(Dispatchers.IO) {
         val nowMillis = System.currentTimeMillis()
         val currentTimeFormatted = SimpleDateFormat("HH:mm (h:mm a)", Locale.getDefault()).format(Date(nowMillis))
-        val apiKey = BuildConfig.GEMINI_API_KEY
 
-        val isKeyConfigured = apiKey.isNotBlank() && apiKey != "MY_GEMINI_API_KEY"
-        if (isKeyConfigured) {
-            try {
-                val schema = buildJsonObject {
-                    put("type", "OBJECT")
-                    putJsonObject("properties") {
-                        putJsonObject("title") {
-                            put("type", "STRING")
-                            put("description", "Concise task title extracted from the user's request.")
-                        }
-                        putJsonObject("notes") {
-                            put("type", "STRING")
-                            put("description", "Helpful context or reminder notes for the task.")
-                        }
-                        putJsonObject("priority") {
-                            put("type", "STRING")
-                            put("description", "One of LOW, MEDIUM, HIGH, URGENT.")
-                        }
-                        putJsonObject("workspaceName") {
-                            put("type", "STRING")
-                            put("description", "Best matching workspace name from ${availableWorkspaces.joinToString()}.")
-                        }
-                        putJsonObject("delaySeconds") {
-                            put("type", "INTEGER")
-                            put("description", "Number of seconds from now to trigger the alert if relative time is used (e.g. 'in 1 minute' = 60, 'now' = 5). Use 0 if specific clock time is given.")
-                        }
-                        putJsonObject("targetHour24") {
-                            put("type", "INTEGER")
-                            put("description", "24-hour clock hour (0-23) if user specified an exact clock time like 'at 5:30 PM', otherwise -1.")
-                        }
-                        putJsonObject("targetMinute") {
-                            put("type", "INTEGER")
-                            put("description", "Clock minute (0-59) if user specified an exact clock time, otherwise -1.")
-                        }
-                        putJsonObject("alertMode") {
-                            put("type", "STRING")
-                            put("description", "One of CALL (if user asks for a call/ring/phone alert), POPUP (if user asks for pop-up/dialog), or NOTIFICATION (standard alert).")
-                        }
-                        putJsonObject("subtasks") {
-                            put("type", "ARRAY")
-                            putJsonObject("items") { put("type", "STRING") }
-                            put("description", "2 to 3 actionable checklist steps for the task.")
-                        }
-                        putJsonObject("tags") {
-                            put("type", "ARRAY")
-                            putJsonObject("items") { put("type", "STRING") }
-                            put("description", "1 or 2 short lowercase tags.")
-                        }
-                        putJsonObject("agentReply") {
-                            put("type", "STRING")
-                            put("description", "Friendly confirmation message explaining what task was added, when it will trigger, and whether it will ring as a Call, Pop-Up, or Notification.")
-                        }
-                    }
-                    putJsonArray("required") {
-                        add(kotlinx.serialization.json.JsonPrimitive("title"))
-                        add(kotlinx.serialization.json.JsonPrimitive("notes"))
-                        add(kotlinx.serialization.json.JsonPrimitive("priority"))
-                        add(kotlinx.serialization.json.JsonPrimitive("workspaceName"))
-                        add(kotlinx.serialization.json.JsonPrimitive("delaySeconds"))
-                        add(kotlinx.serialization.json.JsonPrimitive("targetHour24"))
-                        add(kotlinx.serialization.json.JsonPrimitive("targetMinute"))
-                        add(kotlinx.serialization.json.JsonPrimitive("alertMode"))
-                        add(kotlinx.serialization.json.JsonPrimitive("subtasks"))
-                        add(kotlinx.serialization.json.JsonPrimitive("tags"))
-                        add(kotlinx.serialization.json.JsonPrimitive("agentReply"))
-                    }
-                }
-
-                val systemPrompt = """
-                    You are the TaskFlow AI Reminder & Call Agent.
-                    Current local time is $currentTimeFormatted.
-                    Available workspaces: ${availableWorkspaces.joinToString(", ")}.
-                    Extract the user's task, schedule time, and preferred alert style:
-                    - If they mention "call", "ring", "getting a call", or "voice", set alertMode to "CALL".
-                    - If they mention "pop up", "popup", "modal", or "screen alert", set alertMode to "POPUP".
-                    - Otherwise, if they ask to notify/remind without specifying, default to "POPUP" or "CALL" based on urgency.
-                    Always generate 2-3 helpful subtasks and a warm, concise agentReply.
-                """.trimIndent()
-
-                val request = GenerateContentRequest(
-                    contents = listOf(Content(parts = listOf(Part(text = userPrompt)))),
-                    generationConfig = GenerationConfig(
-                        responseMimeType = "application/json",
-                        responseSchema = schema,
-                        temperature = 0.2f
-                    ),
-                    systemInstruction = Content(parts = listOf(Part(text = systemPrompt)))
-                )
-
-                val response = apiService.generateContent(apiKey, request)
-                val rawJson = response.candidates.firstOrNull()?.content?.parts?.firstOrNull()?.text
-                if (!rawJson.isNullOrBlank()) {
-                    val plan = jsonFormat.decodeFromString<ParsedAgentTaskPlan>(rawJson)
-                    return@withContext convertPlanToAction(plan, nowMillis)
-                }
-            } catch (_: Exception) {
-                // Fall through to deterministic local NLU parser so user workflow never breaks
+        try {
+            val contextualPrompt = buildString {
+                appendLine("Current local time: $currentTimeFormatted")
+                appendLine("Available workspaces: ${availableWorkspaces.joinToString(", ")}")
+                append("User request: $userPrompt")
             }
+
+            val response = withTimeout(INFERENCE_TIMEOUT_MS) {
+                generativeModel.generateContent(contextualPrompt)
+            }
+            val rawJson = response.text
+            if (!rawJson.isNullOrBlank()) {
+                val plan = jsonFormat.decodeFromString<ParsedAgentTaskPlan>(rawJson)
+                return@withContext convertPlanToAction(plan, nowMillis)
+            }
+        } catch (_: Exception) {
+            // Fall through to deterministic local NLU parser so offline/voice workflows never break
         }
 
         parseLocally(userPrompt, nowMillis, availableWorkspaces)

@@ -19,6 +19,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import com.example.auth.authStateFlow
+import com.example.auth.configureAppCheck
 import com.example.auth.signOutUser
 import com.example.data.model.TaskAlertMode
 import com.example.data.model.TaskItem
@@ -37,6 +38,10 @@ import com.google.firebase.firestore.FirebaseFirestore
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+        // STEP 1: Configure Firebase App Check with launch intent before any UI or Firebase operations
+        configureAppCheck(this, intent)
+
         configureLockScreenAndWakeFlags()
         enableEdgeToEdge()
         handleIncomingIntent(intent)
